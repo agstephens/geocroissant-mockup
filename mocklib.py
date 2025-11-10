@@ -9,6 +9,8 @@ actual libraries to be installed.
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+from tqdm import tqdm
+from time import sleep
 
 # Detect if running in a Notebook environment and record as a variable
 try:
@@ -200,12 +202,14 @@ class MockExperiment:
 
 
 class MockVariable:
-    def __init__(self, var_id, long_name, units, frequency, dimensions):
+    def __init__(self, var_id, long_name, units, frequency, dimensions, warnings=None):
         self.variable_id = var_id
         self.long_name = long_name
         self.units = units
         self.frequency = frequency
         self.dimensions = dimensions
+
+        self.warnings = warnings if warnings else []
 
 
 class MockXArrayDataset:
@@ -301,14 +305,17 @@ class MockDataLoader:
                     batch_features.append(features.data)
                     batch_targets.append(targets.data)
             
-            batch_features = MockTorch.Tensor(np.stack(batch_features))
-            batch_targets = MockTorch.Tensor(np.stack(batch_targets))
+            batch_features = torch.Tensor(np.stack(batch_features))
+            batch_targets = torch.Tensor(np.stack(batch_targets))
+            sleep(0.25)  # Simulate data loading time
             yield batch_features, batch_targets
 
 
 class MockCMIP6Dataset:
-    def __init__(self, transformers=None):
+    def __init__(self, transformers=None, warnings=None):
         self.transformers = transformers if transformers is not None else []
+        self.warnings = warnings if warnings is not None else []
+
         self.id = "cmip6_global_climate"
         self.title = "CMIP6 Global Climate Projections"
         self.description = "Comprehensive climate model data from CMIP6 including temperature, precipitation, and atmospheric variables"
@@ -338,6 +345,18 @@ class MockCMIP6Dataset:
                 'summaries': {'variables': ['psl', 'ua', 'va', 'zg', 'hus']}
             })()
         ]
+
+    def __getattr__(self, attr):
+        if attr == "variables":
+            warnings = [{"title": "Variable-level information about Eastward Near-Surface Wind ('ua')",
+                         "message": """The Eastward Near-Surface Wind ('ua') variable:
+            - is provided on a staggered grid when compared to non-wind surface variables.
+            - has the units m/s
+            - is calculated as 10-minute mean
+            """}]
+            show_info(warnings[0]["message"], title=warnings[0]["title"])
+            return {"ua": MockVariable("ua", "Eastward Near-Surface Wind", "m s-1", "mon", ["time", "lat", "lon"],
+                                        warnings=warnings)}
     
     def filter(self, **criteria):
         """Filter the dataset based on provided criteria"""
@@ -382,6 +401,18 @@ class MockCMIP6Dataset:
             return ["models", "experiments", "variables", "frequencies", "realms", "institutions", "grids", "time_ranges"]
         else:
             return []
+        
+    def preload(self, cache_dir, n_workers=1, progress_bar=tqdm):
+        n = 500_000
+
+        print(f"Preparing to download {n} data files to cache directory: {cache_dir}")
+        print(f"  using {n_workers} worker processes.")
+        for i in tqdm(range(0, n, (n//20))):
+            # Simulate processing each data batch
+            sleep(0.3)
+            print(f"Caching files: {i:,d} to {i + (n//20):,d}")
+
+        print("\n\nCaching completed. 240TiB downloaded.")
 
 
 class GeoCroissant:
@@ -421,20 +452,27 @@ class GeoCroissant:
 
     def load_dataset(self, dataset_name, suppress_warnings=False, transformers=None, **kwargs):
         if dataset_name == "CMIP6_Global_Climate_Projections":
-            if not suppress_warnings:
-                show_info(
-                    message="""The CMIP6 Dataset has the following important factors:\n
+            warnings = [{"title": "Important information about the CMIP6 Dataset",
+                         "message": """The CMIP6 Dataset has the following important factors:\n
     - It is a multi-model ensemble of global climate projections.
     - The dataset includes variables such as temperature, precipitation, and wind.
     - It is available at a spatial resolution of 1.25° x 1.25°.
     - Different models will have varying temporal coverages and spatial resolutions.
     See: more information at <a href="https://esgf-node.llnl.gov/projects/cmip6/">https://esgf-node.llnl.gov/projects/cmip6/</a>
-        """,
-                        title="Important information about the CMIP6 Dataset")
-            return MockCMIP6Dataset(transformers=transformers)
+        """}]
+
+            if not suppress_warnings:
+                show_info(
+                    message=warnings[0]["message"],
+                    title=warnings[0]["title"])
+                
+            return MockCMIP6Dataset(transformers=transformers, warnings=warnings)
         else:
             raise ValueError(f"Dataset {dataset_name} not found")
 
+    def set_cache_directory(self, path):
+        print(f"Setting cache directory to: {path}")
+        self.cache_dir = path
 
 # Mock Matplotlib
 class MockPlt:
@@ -494,7 +532,8 @@ croissant.GeoCroissant = GeoCroissant
 torch = MockTorch()
 torch.optim = MockOptim()
 torch.device = MockTorch.device
-torch.cuda = MockCuda()
+# torch.cuda = MockCuda()
+torch.cuda = type('cuda', (), {'is_available': lambda x: False})()  # Mock CUDA
 
 xr = MockXArray()
 
@@ -507,6 +546,12 @@ pystac_client = type('Client', (), {})()
 STACIntegration = type('STACIntegration', (), {})()
 DataLoader = MockDataLoader
 Dataset = type('Dataset', (), {})()
+
+# Create ceda_auth module mock
+class ceda_auth:
+    @staticmethod
+    def get_access_token(refresh=False):
+        return "mocked_ceda_access_token_1234567890"
 
 # Export all the classes and objects that notebooks might import
 __all__ = [

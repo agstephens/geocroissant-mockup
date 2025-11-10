@@ -31,6 +31,15 @@ def show_info(message, title=None, notebook_off=False):
         print(f"{title}\n{underline}\n{message}")
 
 
+class MockClass:
+    def __init__(self, name, **kwargs):
+        self.name = name
+        self.kwargs = kwargs
+
+    def __repr__(self):
+        return f"Transformer type: {self.name}, Specification: {self.kwargs}"
+    
+
 class MockTransformer:
     def __init__(self, name):
         self.name = name
@@ -38,22 +47,28 @@ class MockTransformer:
     def transform(self, data):
         # Mock transformation logic
         return data
+    
+    def __call__(self, **kwargs):
+        return MockClass(self.name, **kwargs)
 
-class GenericContainer:
-    def __init__(self, attrs):
-        for attr in attrs:
-            setattr(self, attr.name, self._generic_method)
-        
-    def _generic_method(self, *args, **kwargs):
-        pass
+
+class MockTransformers: 
+    def __init__(self) -> None:
+        self.RegridTransformer = MockTransformer('RegridTransformer')
+        self.TypeCoercionTransformer = MockTransformer('TypeCoercionTransformer')
+        self.MissingValueImputer = MockTransformer('MissingValueImputer')
+
+    def __iter__(self):
+        return iter([
+            self.RegridTransformer,
+            self.TypeCoercionTransformer,
+            self.MissingValueImputer
+        ])
 
 # Mock the core libraries and classes
 class MockCroissant:
     __version__ = "1.2.3"
-    transformers = GenericContainer([
-        MockTransformer('RegridTransformer'), 
-        MockTransformer('TypeCoercionTransformer'), 
-        MockTransformer('MissingValueImputer')])
+    transformers = MockTransformers()
 
 
 class MockTorch:
